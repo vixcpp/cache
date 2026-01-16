@@ -1,4 +1,18 @@
-#pragma once
+/**
+ *
+ *  @file CacheContextMapper.hpp
+ *  @author Gaspard Kirira
+ *
+ *  Copyright 2025, Gaspard Kirira.  All rights reserved.
+ *  https://github.com/vixcpp/vix
+ *  Use of this source code is governed by a MIT license
+ *  that can be found in the License file.
+ *
+ *  Vix.cpp
+ *
+ */
+#ifndef VIX_CACHE_CONTEXT_MAPPER_HPP
+#define VIX_CACHE_CONTEXT_MAPPER_HPP
 
 #include <cstdint>
 
@@ -7,57 +21,41 @@
 
 namespace vix::cache
 {
+  enum class RequestOutcome
+  {
+    Ok,
+    NetworkError
+  };
 
-    /**
-     * Minimal classification of request outcomes for caching decisions.
-     * - Ok: request succeeded (HTTP 2xx/3xx/4xx/5xx all reached server)
-     * - NetworkError: request failed due to network (timeout, DNS, reset...)
-     *
-     * NOTE: HTTP 5xx is NOT a network error: the network worked.
-     */
-    enum class RequestOutcome
+  inline CacheContext contextFromProbe(
+      const vix::net::NetworkProbe &probe,
+      std::int64_t now_ms)
+  {
+    CacheContext ctx{};
+    if (!probe.isOnline(now_ms))
     {
-        Ok,
-        NetworkError
-    };
-
-    /**
-     * Build CacheContext only from NetworkProbe.
-     * If probe says offline => ctx.offline=true
-     */
-    inline CacheContext contextFromProbe(const vix::net::NetworkProbe &probe,
-                                         std::int64_t now_ms)
-    {
-        CacheContext ctx{};
-        if (!probe.isOnline(now_ms))
-        {
-            ctx.offline = true;
-        }
-        return ctx;
+      ctx.offline = true;
     }
+    return ctx;
+  }
 
-    /**
-     * Combine NetworkProbe + request outcome.
-     * - offline is driven by probe
-     * - network_error is driven by the request outcome
-     */
-    inline CacheContext contextFromProbeAndOutcome(const vix::net::NetworkProbe &probe,
-                                                   std::int64_t now_ms,
-                                                   RequestOutcome outcome)
+  inline CacheContext contextFromProbeAndOutcome(
+      const vix::net::NetworkProbe &probe,
+      std::int64_t now_ms,
+      RequestOutcome outcome)
+  {
+    CacheContext ctx = contextFromProbe(probe, now_ms);
+    if (outcome == RequestOutcome::NetworkError)
     {
-        CacheContext ctx = contextFromProbe(probe, now_ms);
-        if (outcome == RequestOutcome::NetworkError)
-        {
-            ctx.network_error = true;
-        }
-        return ctx;
+      ctx.network_error = true;
     }
+    return ctx;
+  }
 
-    /**
-     * Utility helpers
-     */
-    inline CacheContext contextOffline() noexcept { return CacheContext::Offline(); }
-    inline CacheContext contextOnline() noexcept { return CacheContext::Online(); }
-    inline CacheContext contextNetworkError() noexcept { return CacheContext::NetworkError(); }
+  inline CacheContext contextOffline() noexcept { return CacheContext::Offline(); }
+  inline CacheContext contextOnline() noexcept { return CacheContext::Online(); }
+  inline CacheContext contextNetworkError() noexcept { return CacheContext::NetworkError(); }
 
 } // namespace vix::cache
+
+#endif

@@ -1,3 +1,16 @@
+/**
+ *
+ *  @file Cache.cpp
+ *  @author Gaspard Kirira
+ *
+ *  Copyright 2025, Gaspard Kirira.  All rights reserved.
+ *  https://github.com/vixcpp/vix
+ *  Use of this source code is governed by a MIT license
+ *  that can be found in the License file.
+ *
+ *  Vix.cpp
+ *
+ */
 #include <algorithm>
 #include <vix/cache/LruMemoryStore.hpp>
 #include <vix/cache/FileStore.hpp>
@@ -7,75 +20,76 @@
 namespace vix::cache
 {
 
-    Cache::Cache(CachePolicy policy, std::shared_ptr<CacheStore> store)
-        : policy_(policy), store_(std::move(store)) {}
+  Cache::Cache(CachePolicy policy, std::shared_ptr<CacheStore> store)
+      : policy_(policy), store_(std::move(store)) {}
 
-    std::optional<CacheEntry> Cache::get(const std::string &key,
-                                         std::int64_t now_ms,
-                                         CacheContext ctx)
+  std::optional<CacheEntry> Cache::get(
+      const std::string &key,
+      std::int64_t now_ms,
+      CacheContext ctx)
+  {
+    auto e = store_->get(key);
+    if (!e)
+      return std::nullopt;
+
+    const auto age = now_ms - e->created_at_ms;
+
+    if (policy_.is_fresh(age))
     {
-        auto e = store_->get(key);
-        if (!e)
-            return std::nullopt;
-
-        const auto age = now_ms - e->created_at_ms;
-
-        if (policy_.is_fresh(age))
-        {
-            return e;
-        }
-
-        if (ctx.offline && policy_.allow_stale_offline(age))
-        {
-            return e;
-        }
-
-        if (ctx.network_error && policy_.allow_stale_error(age))
-        {
-            return e;
-        }
-
-        return std::nullopt;
+      return e;
     }
 
-    void Cache::put(const std::string &key, const CacheEntry &entry)
+    if (ctx.offline && policy_.allow_stale_offline(age))
     {
-        CacheEntry e = entry;
-        HeaderUtil::normalizeInPlace(e.headers);
-        store_->put(key, e);
+      return e;
     }
 
-    static std::int64_t max_age_for_policy(const CachePolicy &p)
+    if (ctx.network_error && policy_.allow_stale_error(age))
     {
-        std::int64_t m = p.ttl_ms;
-        if (p.allow_stale_if_error)
-            m = std::max(m, p.stale_if_error_ms);
-        if (p.allow_stale_if_offline)
-            m = std::max(m, p.stale_if_offline_ms);
-        return m;
+      return e;
     }
 
-    std::size_t Cache::prune(std::int64_t now_ms)
-    {
-        const std::int64_t max_age = max_age_for_policy(policy_);
+    return std::nullopt;
+  }
 
-        if (auto *lru = dynamic_cast<LruMemoryStore *>(store_.get()))
-        {
-            return lru->eraseIf([&](const CacheEntry &e)
-                                {
+  void Cache::put(const std::string &key, const CacheEntry &entry)
+  {
+    CacheEntry e = entry;
+    HeaderUtil::normalizeInPlace(e.headers);
+    store_->put(key, e);
+  }
+
+  static std::int64_t max_age_for_policy(const CachePolicy &p)
+  {
+    std::int64_t m = p.ttl_ms;
+    if (p.allow_stale_if_error)
+      m = std::max(m, p.stale_if_error_ms);
+    if (p.allow_stale_if_offline)
+      m = std::max(m, p.stale_if_offline_ms);
+    return m;
+  }
+
+  std::size_t Cache::prune(std::int64_t now_ms)
+  {
+    const std::int64_t max_age = max_age_for_policy(policy_);
+
+    if (auto *lru = dynamic_cast<LruMemoryStore *>(store_.get()))
+    {
+      return lru->eraseIf([&](const CacheEntry &e)
+                          {
                 const auto age = now_ms - e.created_at_ms;
                 return age > max_age; });
-        }
+    }
 
-        if (auto *fs = dynamic_cast<FileStore *>(store_.get()))
-        {
-            return fs->eraseIf([&](const CacheEntry &e)
-                               {
+    if (auto *fs = dynamic_cast<FileStore *>(store_.get()))
+    {
+      return fs->eraseIf([&](const CacheEntry &e)
+                         {
                 const auto age = now_ms - e.created_at_ms;
                 return age > max_age; });
-        }
-
-        return 0;
     }
+
+    return 0;
+  }
 
 } // namespace vix::cache

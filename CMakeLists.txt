@@ -1,3 +1,11 @@
+#  @file CMakeLists.cpp
+#  @author Gaspard Kirira
+#
+#  Copyright 2025, Gaspard Kirira.  All rights reserved.
+#  https://github.com/vixcpp/vix
+#  Use of this source code is governed by a MIT license
+#  that can be found in the License file.
+#
 # ====================================================================
 # Vix.cpp — Cache Module
 # ====================================================================
@@ -22,15 +30,15 @@ project(vix_cache VERSION 0.1.0 LANGUAGES CXX)
 
 include(GNUInstallDirs)
 
-# ------------------------ Global settings ----------------------------
+# Global settings
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-# ------------------------ Sources discovery --------------------------
+# Sources discovery
 file(GLOB_RECURSE CACHE_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
 
-# ------------------------- Net dependency ----------------------------
+# Net dependency
 option(VIX_CACHE_FETCH_NET "Auto-fetch vix::net if missing" ON)
 
 if (NOT TARGET vix::net)
@@ -55,7 +63,7 @@ if (NOT TARGET ${VIX_NET_TARGET} AND TARGET vix::net)
   set(VIX_NET_TARGET vix::net)
 endif()
 
-# ============================== STATIC ===============================
+# STATIC
 if (CACHE_SOURCES)
   message(STATUS "[cache] Building STATIC library with detected sources.")
 
@@ -64,7 +72,6 @@ if (CACHE_SOURCES)
 
   target_compile_features(vix_cache PUBLIC cxx_std_20)
 
-  # Public headers for #include <vix/cache/...>
   target_include_directories(vix_cache
     PUBLIC
       $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -101,7 +108,7 @@ if (CACHE_SOURCES)
   install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
           FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h")
 
-# ============================ HEADER-ONLY ============================
+# HEADER-ONLY
 else()
   message(STATUS "[cache] Building HEADER-ONLY library (no sources).")
 
@@ -132,7 +139,7 @@ else()
           FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h")
 endif()
 
-# ----------------------------- Tests ---------------------------------
+# Tests
 option(VIX_CACHE_BUILD_TESTS "Build cache module tests" OFF)
 
 if (VIX_CACHE_BUILD_TESTS)
@@ -141,7 +148,7 @@ if (VIX_CACHE_BUILD_TESTS)
   add_subdirectory(tests)
 endif()
 
-# ----------------------------- Summary -------------------------------
+# Summary
 message(STATUS "------------------------------------------------------")
 message(STATUS "vix::cache configured (${PROJECT_VERSION})")
 if (CACHE_SOURCES)

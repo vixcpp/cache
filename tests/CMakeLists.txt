@@ -1,3 +1,10 @@
+#  @file CMakeLists.cpp
+#  @author Gaspard Kirira
+#
+#  Copyright 2025, Gaspard Kirira.  All rights reserved.
+#  https://github.com/vixcpp/vix
+#  Use of this source code is governed by a MIT license
+#  that can be found in the License file.
 cmake_minimum_required(VERSION 3.20)
 
 # Enable CTest
@@ -7,9 +14,7 @@ if (BUILD_TESTING)
   enable_testing()
 endif()
 
-# ----------------------------
 # Common test settings
-# ----------------------------
 set(VIX_CACHE_TEST_TARGET vix::cache)
 if (NOT TARGET ${VIX_CACHE_TEST_TARGET} AND TARGET vix_cache)
   set(VIX_CACHE_TEST_TARGET vix_cache)
@@ -19,9 +24,7 @@ if (NOT TARGET ${VIX_CACHE_TEST_TARGET})
   message(FATAL_ERROR "[cache/tests] Missing cache target (expected vix::cache or vix_cache).")
 endif()
 
-# ----------------------------
 # Cache smoke test
-# ----------------------------
 add_executable(cache_smoke_test
   http/cache_smoke_test.cpp
 )
@@ -39,9 +42,7 @@ if (BUILD_TESTING)
   )
 endif()
 
-# ----------------------------
 # CacheContextMapper smoke test
-# ----------------------------
 add_executable(cache_context_mapper_smoke_test
   http/cache_context_mapper_smoke_test.cpp
 )
