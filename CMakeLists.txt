@@ -35,33 +35,47 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# --------------------------------------------------------------------
+# Umbrella build policy:
+# When building inside the Vix umbrella, dependencies are managed by the
+# umbrella (add_subdirectory order + options). Cache must not FetchContent
+# nor add sibling subdirectories.
+# --------------------------------------------------------------------
+if (DEFINED VIX_UMBRELLA_BUILD AND VIX_UMBRELLA_BUILD)
+  set(VIX_CACHE_FETCH_NET OFF CACHE BOOL "Auto-fetch vix::net if missing" FORCE)
+endif()
+
 # Sources discovery
 file(GLOB_RECURSE CACHE_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
 
 # Net dependency
 option(VIX_CACHE_FETCH_NET "Auto-fetch vix::net if missing" ON)
 
-if (NOT TARGET vix::net)
-  if (EXISTS "${CMAKE_CURRENT_LIST_DIR}/../net/CMakeLists.txt")
-    message(STATUS "[cache] Adding net from umbrella: ../net")
-    add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../net" "net")
-  elseif (VIX_CACHE_FETCH_NET)
-    include(FetchContent)
-    message(STATUS "[cache] Fetching vix::net via FetchContent")
-    FetchContent_Declare(vix_net
-      GIT_REPOSITORY https://github.com/vixcpp/net.git
-      GIT_TAG        v0.1.0
-    )
-    FetchContent_MakeAvailable(vix_net)
-  else()
-    message(FATAL_ERROR "vix::net not found. Enable VIX_CACHE_FETCH_NET=ON or provide the target before cache.")
+if (DEFINED VIX_UMBRELLA_BUILD AND VIX_UMBRELLA_BUILD)
+  # Umbrella owns dependency graph: never add_subdirectory/FetchContent here.
+  if (NOT TARGET vix::net)
+    message(FATAL_ERROR "[cache] Umbrella build: vix::net must be provided by umbrella before cache.")
+  endif()
+else()
+  if (NOT TARGET vix::net)
+    if (EXISTS "${CMAKE_CURRENT_LIST_DIR}/../net/CMakeLists.txt")
+      message(STATUS "[cache] Adding net from umbrella: ../net")
+      add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../net" "net")
+    elseif (VIX_CACHE_FETCH_NET)
+      include(FetchContent)
+      message(STATUS "[cache] Fetching vix::net via FetchContent")
+      FetchContent_Declare(vix_net
+        GIT_REPOSITORY https://github.com/vixcpp/net.git
+        GIT_TAG        v0.1.0
+      )
+      FetchContent_MakeAvailable(vix_net)
+    else()
+      message(FATAL_ERROR "vix::net not found. Enable VIX_CACHE_FETCH_NET=ON or provide the target before cache.")
+    endif()
   endif()
 endif()
 
 set(VIX_NET_TARGET vix::net)
-if (NOT TARGET ${VIX_NET_TARGET} AND TARGET vix::net)
-  set(VIX_NET_TARGET vix::net)
-endif()
 
 # STATIC
 if (CACHE_SOURCES)
@@ -85,9 +99,10 @@ if (CACHE_SOURCES)
 
   if (TARGET vix_warnings)
     target_link_libraries(vix_cache PUBLIC vix_warnings)
-    if (VIX_ENABLE_SANITIZERS AND TARGET vix_sanitizers)
-      target_link_libraries(vix_cache INTERFACE vix_sanitizers)
-    endif()
+  endif()
+
+  if (VIX_ENABLE_SANITIZERS AND TARGET vix_sanitizers)
+    target_link_libraries(vix_cache PUBLIC vix_sanitizers)
   endif()
 
   set_target_properties(vix_cache PROPERTIES
@@ -105,8 +120,11 @@ if (CACHE_SOURCES)
     INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
   )
 
-  install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-          FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h")
+  if (NOT (DEFINED VIX_UMBRELLA_BUILD AND VIX_UMBRELLA_BUILD))
+    install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+            FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h")
+  endif()
+
 
 # HEADER-ONLY
 else()
@@ -135,8 +153,11 @@ else()
     INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
   )
 
-  install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-          FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h")
+  if (NOT (DEFINED VIX_UMBRELLA_BUILD AND VIX_UMBRELLA_BUILD))
+    install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+            FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h")
+  endif()
+
 endif()
 
 # Tests
