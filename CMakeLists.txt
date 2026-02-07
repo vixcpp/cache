@@ -77,6 +77,54 @@ endif()
 
 set(VIX_NET_TARGET vix::net)
 
+# --------------------------------------------------------------------
+# JSON dependency (required by src/FileStore.cpp -> <nlohmann/json.hpp>)
+# Policy:
+#   - Umbrella: must provide nlohmann_json::nlohmann_json already (or via system).
+#   - Standalone: try CONFIG package, optionally FetchContent if allowed.
+# --------------------------------------------------------------------
+option(VIX_CACHE_FETCH_NLOHMANN "Fetch nlohmann/json if missing (standalone only)" ON)
+
+if (DEFINED VIX_UMBRELLA_BUILD AND VIX_UMBRELLA_BUILD)
+  set(VIX_CACHE_FETCH_NLOHMANN OFF CACHE BOOL "Fetch nlohmann/json if missing (standalone only)" FORCE)
+endif()
+
+set(VIX_NLOHMANN_TARGET "")
+
+# First try CONFIG package
+find_package(nlohmann_json CONFIG QUIET)
+if (TARGET nlohmann_json::nlohmann_json)
+  set(VIX_NLOHMANN_TARGET nlohmann_json::nlohmann_json)
+endif()
+
+# Standalone fallback: FetchContent
+if (NOT VIX_NLOHMANN_TARGET)
+  if (NOT (DEFINED VIX_UMBRELLA_BUILD AND VIX_UMBRELLA_BUILD) AND VIX_CACHE_FETCH_NLOHMANN)
+    include(FetchContent)
+    message(STATUS "[cache] Fetching nlohmann/json via FetchContent")
+    FetchContent_Declare(nlohmann_json
+      GIT_REPOSITORY https://github.com/nlohmann/json.git
+      GIT_TAG        v3.11.3
+    )
+    FetchContent_MakeAvailable(nlohmann_json)
+
+    if (TARGET nlohmann_json::nlohmann_json)
+      set(VIX_NLOHMANN_TARGET nlohmann_json::nlohmann_json)
+    endif()
+  endif()
+endif()
+
+if (NOT VIX_NLOHMANN_TARGET)
+  message(FATAL_ERROR
+    "[cache] Missing dependency: nlohmann_json::nlohmann_json.\n"
+    "Reason: src/FileStore.cpp includes <nlohmann/json.hpp>.\n"
+    "Fix:\n"
+    "  - Umbrella: ensure nlohmann_json is available before adding cache (system package or umbrella fallback).\n"
+    "  - Standalone: install nlohmann_json or set VIX_CACHE_FETCH_NLOHMANN=ON.\n"
+  )
+endif()
+
+
 # STATIC
 if (CACHE_SOURCES)
   message(STATUS "[cache] Building STATIC library with detected sources.")
@@ -92,10 +140,12 @@ if (CACHE_SOURCES)
       $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
   )
 
-  target_link_libraries(vix_cache
+   target_link_libraries(vix_cache
     PUBLIC
       ${VIX_NET_TARGET}
+      ${VIX_NLOHMANN_TARGET}
   )
+
 
   if (TARGET vix_warnings)
     target_link_libraries(vix_cache PUBLIC vix_warnings)
@@ -140,8 +190,9 @@ else()
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
   )
 
-  target_link_libraries(vix_cache INTERFACE
+   target_link_libraries(vix_cache INTERFACE
     ${VIX_NET_TARGET}
+    ${VIX_NLOHMANN_TARGET}
   )
 
   if (VIX_ENABLE_SANITIZERS AND TARGET vix_sanitizers)
@@ -177,6 +228,7 @@ if (CACHE_SOURCES)
 else()
   message(STATUS "Mode: HEADER-ONLY / no sources")
 endif()
+message(STATUS "JSON target:     ${VIX_NLOHMANN_TARGET}")
 message(STATUS "Net target:      ${VIX_NET_TARGET}")
 message(STATUS "Include dir: ${CMAKE_CURRENT_SOURCE_DIR}/include (for <vix/cache/...>)")
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
