@@ -1,7 +1,7 @@
 {
   "name": "cache",
   "namespace": "vix",
-  "version": "0.5.0",
+  "version": "0.1.0",
   "type": "header-and-source",
   "include": "include",
   "src": "src",
