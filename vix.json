@@ -1,0 +1,28 @@
+{
+  "name": "cache",
+  "namespace": "vix",
+  "version": "0.1.0",
+  "type": "header-and-source",
+  "include": "include",
+  "src": "src",
+  "license": "MIT",
+  "description": "HTTP cache engine for Vix. Pluggable cache stores, cache policies, and keying strategies for high-performance HTTP response caching.",
+  "keywords": [
+    "cpp",
+    "vix",
+    "cache",
+    "http",
+    "memory",
+    "file",
+    "lru",
+    "performance",
+    "caching"
+  ],
+  "repository": "https://github.com/vixcpp/cache",
+  "authors": [
+    {
+      "name": "Gaspard Kirira",
+      "github": "Gaspardkirira"
+    }
+  ]
+}
