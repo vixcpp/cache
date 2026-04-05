@@ -90,6 +90,7 @@ if (DEFINED VIX_UMBRELLA_BUILD AND VIX_UMBRELLA_BUILD)
 endif()
 
 set(VIX_NLOHMANN_TARGET "")
+set(_VIX_CACHE_INSTALL_FALLBACK OFF)
 
 # First try CONFIG package
 find_package(nlohmann_json CONFIG QUIET)
@@ -105,21 +106,21 @@ if (NOT VIX_NLOHMANN_TARGET)
     FetchContent_Declare(nlohmann_json
       GIT_REPOSITORY https://github.com/nlohmann/json.git
       GIT_TAG        v3.11.3
+      GIT_SHALLOW    TRUE
     )
     FetchContent_MakeAvailable(nlohmann_json)
 
-    if (TARGET nlohmann_json::nlohmann_json)
-      set(VIX_NLOHMANN_TARGET nlohmann_json::nlohmann_json)
-    endif()
+    # Fallback is header-only: do not export-link it
+    set(_VIX_CACHE_INSTALL_FALLBACK ON)
   endif()
 endif()
 
-if (NOT VIX_NLOHMANN_TARGET)
+if (NOT VIX_NLOHMANN_TARGET AND NOT _VIX_CACHE_INSTALL_FALLBACK)
   message(FATAL_ERROR
-    "[cache] Missing dependency: nlohmann_json::nlohmann_json.\n"
+    "[cache] Missing dependency: nlohmann_json.\n"
     "Reason: src/FileStore.cpp includes <nlohmann/json.hpp>.\n"
     "Fix:\n"
-    "  - Umbrella: ensure nlohmann_json is available before adding cache (system package or umbrella fallback).\n"
+    "  - Umbrella: ensure nlohmann_json is available before adding cache.\n"
     "  - Standalone: install nlohmann_json or set VIX_CACHE_FETCH_NLOHMANN=ON.\n"
   )
 endif()
@@ -140,12 +141,21 @@ if (CACHE_SOURCES)
       $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
   )
 
-   target_link_libraries(vix_cache
+  if (_VIX_CACHE_INSTALL_FALLBACK)
+    target_include_directories(vix_cache
+      PUBLIC
+        $<BUILD_INTERFACE:${nlohmann_json_SOURCE_DIR}/single_include>
+    )
+  endif()
+
+  target_link_libraries(vix_cache
     PUBLIC
       ${VIX_NET_TARGET}
-      ${VIX_NLOHMANN_TARGET}
   )
 
+  if (VIX_NLOHMANN_TARGET)
+    target_link_libraries(vix_cache PUBLIC ${VIX_NLOHMANN_TARGET})
+  endif()
 
   if (TARGET vix_warnings)
     target_link_libraries(vix_cache PUBLIC vix_warnings)
@@ -162,6 +172,14 @@ if (CACHE_SOURCES)
     EXPORT_NAME cache
   )
 
+  if (_VIX_CACHE_INSTALL_FALLBACK)
+    install(
+      DIRECTORY "${nlohmann_json_SOURCE_DIR}/single_include/nlohmann"
+      DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+      FILES_MATCHING PATTERN "*.hpp"
+    )
+  endif()
+
   install(TARGETS vix_cache
     EXPORT VixTargets
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -174,7 +192,6 @@ if (CACHE_SOURCES)
     install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
             FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h")
   endif()
-
 
 # HEADER-ONLY
 else()
@@ -190,10 +207,19 @@ else()
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
   )
 
-   target_link_libraries(vix_cache INTERFACE
+  if (_VIX_CACHE_INSTALL_FALLBACK)
+    target_include_directories(vix_cache INTERFACE
+      $<BUILD_INTERFACE:${nlohmann_json_SOURCE_DIR}/single_include>
+    )
+  endif()
+
+  target_link_libraries(vix_cache INTERFACE
     ${VIX_NET_TARGET}
-    ${VIX_NLOHMANN_TARGET}
   )
+
+  if (VIX_NLOHMANN_TARGET)
+    target_link_libraries(vix_cache INTERFACE ${VIX_NLOHMANN_TARGET})
+  endif()
 
   if (VIX_ENABLE_SANITIZERS AND TARGET vix_sanitizers)
     target_link_libraries(vix_cache INTERFACE vix_sanitizers)
@@ -203,6 +229,14 @@ else()
     EXPORT VixTargets
     INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
   )
+
+  if (_VIX_CACHE_INSTALL_FALLBACK)
+    install(
+      DIRECTORY "${nlohmann_json_SOURCE_DIR}/single_include/nlohmann"
+      DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+      FILES_MATCHING PATTERN "*.hpp"
+    )
+  endif()
 
   if (NOT (DEFINED VIX_UMBRELLA_BUILD AND VIX_UMBRELLA_BUILD))
     install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
