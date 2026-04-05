@@ -7,7 +7,7 @@
 #  that can be found in the License file.
 #
 # ====================================================================
-# Vix.cpp — Cache Module
+# Vix.cpp - Cache Module
 # ====================================================================
 # Purpose:
 #   HTTP caching engine for Vix. Provides pluggable cache stores,
@@ -20,6 +20,7 @@
 #
 # Public Dependencies:
 #   - vix::net
+#   - vix::json
 #
 # Installation/Export:
 #   Installs into the umbrella export-set `VixTargets`.
@@ -48,11 +49,12 @@ endif()
 # Sources discovery
 file(GLOB_RECURSE CACHE_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
 
+# --------------------------------------------------------------------
 # Net dependency
+# --------------------------------------------------------------------
 option(VIX_CACHE_FETCH_NET "Auto-fetch vix::net if missing" ON)
 
 if (DEFINED VIX_UMBRELLA_BUILD AND VIX_UMBRELLA_BUILD)
-  # Umbrella owns dependency graph: never add_subdirectory/FetchContent here.
   if (NOT TARGET vix::net)
     message(FATAL_ERROR "[cache] Umbrella build: vix::net must be provided by umbrella before cache.")
   endif()
@@ -70,7 +72,8 @@ else()
       )
       FetchContent_MakeAvailable(vix_net)
     else()
-      message(FATAL_ERROR "vix::net not found. Enable VIX_CACHE_FETCH_NET=ON or provide the target before cache.")
+      message(FATAL_ERROR
+        "vix::net not found. Enable VIX_CACHE_FETCH_NET=ON or provide the target before cache.")
     endif()
   endif()
 endif()
@@ -78,55 +81,35 @@ endif()
 set(VIX_NET_TARGET vix::net)
 
 # --------------------------------------------------------------------
-# JSON dependency (required by src/FileStore.cpp -> <nlohmann/json.hpp>)
+# JSON dependency
 # Policy:
-#   - Umbrella: must provide nlohmann_json::nlohmann_json already (or via system).
-#   - Standalone: try CONFIG package, optionally FetchContent if allowed.
+#   - Umbrella: vix::json must already be provided by umbrella.
+#   - Standalone: try sibling ../json first.
+# Notes:
+#   - Cache must not export-link nlohmann_json directly.
+#   - The json module owns the backend provider selection.
 # --------------------------------------------------------------------
-option(VIX_CACHE_FETCH_NLOHMANN "Fetch nlohmann/json if missing (standalone only)" ON)
-
 if (DEFINED VIX_UMBRELLA_BUILD AND VIX_UMBRELLA_BUILD)
-  set(VIX_CACHE_FETCH_NLOHMANN OFF CACHE BOOL "Fetch nlohmann/json if missing (standalone only)" FORCE)
-endif()
-
-set(VIX_NLOHMANN_TARGET "")
-set(_VIX_CACHE_INSTALL_FALLBACK OFF)
-
-# First try CONFIG package
-find_package(nlohmann_json CONFIG QUIET)
-if (TARGET nlohmann_json::nlohmann_json)
-  set(VIX_NLOHMANN_TARGET nlohmann_json::nlohmann_json)
-endif()
-
-# Standalone fallback: FetchContent
-if (NOT VIX_NLOHMANN_TARGET)
-  if (NOT (DEFINED VIX_UMBRELLA_BUILD AND VIX_UMBRELLA_BUILD) AND VIX_CACHE_FETCH_NLOHMANN)
-    include(FetchContent)
-    message(STATUS "[cache] Fetching nlohmann/json via FetchContent")
-    FetchContent_Declare(nlohmann_json
-      GIT_REPOSITORY https://github.com/nlohmann/json.git
-      GIT_TAG        v3.11.3
-      GIT_SHALLOW    TRUE
-    )
-    FetchContent_MakeAvailable(nlohmann_json)
-
-    # Fallback is header-only: do not export-link it
-    set(_VIX_CACHE_INSTALL_FALLBACK ON)
+  if (NOT TARGET vix::json)
+    message(FATAL_ERROR "[cache] Umbrella build: vix::json must be provided by umbrella before cache.")
+  endif()
+else()
+  if (NOT TARGET vix::json)
+    if (EXISTS "${CMAKE_CURRENT_LIST_DIR}/../json/CMakeLists.txt")
+      message(STATUS "[cache] Adding json from umbrella: ../json")
+      add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../json" "json")
+    else()
+      message(FATAL_ERROR
+        "vix::json not found. Provide the target before cache or make sure ../json is available.")
+    endif()
   endif()
 endif()
 
-if (NOT VIX_NLOHMANN_TARGET AND NOT _VIX_CACHE_INSTALL_FALLBACK)
-  message(FATAL_ERROR
-    "[cache] Missing dependency: nlohmann_json.\n"
-    "Reason: src/FileStore.cpp includes <nlohmann/json.hpp>.\n"
-    "Fix:\n"
-    "  - Umbrella: ensure nlohmann_json is available before adding cache.\n"
-    "  - Standalone: install nlohmann_json or set VIX_CACHE_FETCH_NLOHMANN=ON.\n"
-  )
-endif()
+set(VIX_JSON_TARGET vix::json)
 
-
-# STATIC
+# --------------------------------------------------------------------
+# Library mode
+# --------------------------------------------------------------------
 if (CACHE_SOURCES)
   message(STATUS "[cache] Building STATIC library with detected sources.")
 
@@ -141,21 +124,12 @@ if (CACHE_SOURCES)
       $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
   )
 
-  if (_VIX_CACHE_INSTALL_FALLBACK)
-    target_include_directories(vix_cache
-      PUBLIC
-        $<BUILD_INTERFACE:${nlohmann_json_SOURCE_DIR}/single_include>
-    )
-  endif()
-
   target_link_libraries(vix_cache
     PUBLIC
       ${VIX_NET_TARGET}
+    PRIVATE
+      ${VIX_JSON_TARGET}
   )
-
-  if (VIX_NLOHMANN_TARGET)
-    target_link_libraries(vix_cache PUBLIC ${VIX_NLOHMANN_TARGET})
-  endif()
 
   if (TARGET vix_warnings)
     target_link_libraries(vix_cache PUBLIC vix_warnings)
@@ -172,14 +146,6 @@ if (CACHE_SOURCES)
     EXPORT_NAME cache
   )
 
-  if (_VIX_CACHE_INSTALL_FALLBACK)
-    install(
-      DIRECTORY "${nlohmann_json_SOURCE_DIR}/single_include/nlohmann"
-      DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
-      FILES_MATCHING PATTERN "*.hpp"
-    )
-  endif()
-
   install(TARGETS vix_cache
     EXPORT VixTargets
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -189,11 +155,13 @@ if (CACHE_SOURCES)
   )
 
   if (NOT (DEFINED VIX_UMBRELLA_BUILD AND VIX_UMBRELLA_BUILD))
-    install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-            FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h")
+    install(
+      DIRECTORY include/
+      DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+      FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h"
+    )
   endif()
 
-# HEADER-ONLY
 else()
   message(STATUS "[cache] Building HEADER-ONLY library (no sources).")
 
@@ -207,19 +175,10 @@ else()
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
   )
 
-  if (_VIX_CACHE_INSTALL_FALLBACK)
-    target_include_directories(vix_cache INTERFACE
-      $<BUILD_INTERFACE:${nlohmann_json_SOURCE_DIR}/single_include>
-    )
-  endif()
-
   target_link_libraries(vix_cache INTERFACE
     ${VIX_NET_TARGET}
+    ${VIX_JSON_TARGET}
   )
-
-  if (VIX_NLOHMANN_TARGET)
-    target_link_libraries(vix_cache INTERFACE ${VIX_NLOHMANN_TARGET})
-  endif()
 
   if (VIX_ENABLE_SANITIZERS AND TARGET vix_sanitizers)
     target_link_libraries(vix_cache INTERFACE vix_sanitizers)
@@ -230,22 +189,18 @@ else()
     INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
   )
 
-  if (_VIX_CACHE_INSTALL_FALLBACK)
+  if (NOT (DEFINED VIX_UMBRELLA_BUILD AND VIX_UMBRELLA_BUILD))
     install(
-      DIRECTORY "${nlohmann_json_SOURCE_DIR}/single_include/nlohmann"
-      DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
-      FILES_MATCHING PATTERN "*.hpp"
+      DIRECTORY include/
+      DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+      FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h"
     )
   endif()
-
-  if (NOT (DEFINED VIX_UMBRELLA_BUILD AND VIX_UMBRELLA_BUILD))
-    install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-            FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h")
-  endif()
-
 endif()
 
+# --------------------------------------------------------------------
 # Tests
+# --------------------------------------------------------------------
 option(VIX_CACHE_BUILD_TESTS "Build cache module tests" OFF)
 
 if (VIX_CACHE_BUILD_TESTS)
@@ -254,7 +209,9 @@ if (VIX_CACHE_BUILD_TESTS)
   add_subdirectory(tests)
 endif()
 
+# --------------------------------------------------------------------
 # Summary
+# --------------------------------------------------------------------
 message(STATUS "------------------------------------------------------")
 message(STATUS "vix::cache configured (${PROJECT_VERSION})")
 if (CACHE_SOURCES)
@@ -262,7 +219,7 @@ if (CACHE_SOURCES)
 else()
   message(STATUS "Mode: HEADER-ONLY / no sources")
 endif()
-message(STATUS "JSON target:     ${VIX_NLOHMANN_TARGET}")
+message(STATUS "JSON target:     ${VIX_JSON_TARGET}")
 message(STATUS "Net target:      ${VIX_NET_TARGET}")
 message(STATUS "Include dir: ${CMAKE_CURRENT_SOURCE_DIR}/include (for <vix/cache/...>)")
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
