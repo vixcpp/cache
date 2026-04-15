@@ -30,6 +30,7 @@ cmake_minimum_required(VERSION 3.20)
 project(vix_cache VERSION 0.1.0 LANGUAGES CXX)
 
 include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
 
 # Global settings
 set(CMAKE_CXX_STANDARD 20)
@@ -51,61 +52,146 @@ file(GLOB_RECURSE CACHE_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
 
 # --------------------------------------------------------------------
 # Net dependency
+# Resolution policy:
+#   1) Reuse already available targets
+#   2) Try local sibling module
+#   3) Try installed packages
+#   4) Optional FetchContent as last resort
 # --------------------------------------------------------------------
 option(VIX_CACHE_FETCH_NET "Auto-fetch vix::net if missing" ON)
 
-if (DEFINED VIX_UMBRELLA_BUILD AND VIX_UMBRELLA_BUILD)
-  if (NOT TARGET vix::net)
-    message(FATAL_ERROR "[cache] Umbrella build: vix::net must be provided by umbrella before cache.")
-  endif()
+set(VIX_NET_TARGET "")
+
+if (TARGET vix::net)
+  message(STATUS "[cache] Using existing target vix::net")
+  set(VIX_NET_TARGET vix::net)
+
+elseif (TARGET vix_net)
+  message(STATUS "[cache] Using existing target vix_net")
+  set(VIX_NET_TARGET vix_net)
+
+elseif (TARGET net)
+  message(STATUS "[cache] Using existing target net")
+  set(VIX_NET_TARGET net)
+
 else()
-  if (NOT TARGET vix::net)
-    if (EXISTS "${CMAKE_CURRENT_LIST_DIR}/../net/CMakeLists.txt")
-      message(STATUS "[cache] Adding net from umbrella: ../net")
-      add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../net" "net")
-    elseif (VIX_CACHE_FETCH_NET)
-      include(FetchContent)
-      message(STATUS "[cache] Fetching vix::net via FetchContent")
-      FetchContent_Declare(vix_net
-        GIT_REPOSITORY https://github.com/vixcpp/net.git
-        GIT_TAG        v0.1.0
-      )
-      FetchContent_MakeAvailable(vix_net)
-    else()
-      message(FATAL_ERROR
-        "vix::net not found. Enable VIX_CACHE_FETCH_NET=ON or provide the target before cache.")
+  get_filename_component(_VIX_MODULES_DIR "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
+  set(_VIX_NET_DIR "${_VIX_MODULES_DIR}/net")
+
+  if (EXISTS "${_VIX_NET_DIR}/CMakeLists.txt")
+    message(STATUS "[cache] Adding local sibling net: ${_VIX_NET_DIR}")
+    add_subdirectory("${_VIX_NET_DIR}" "${CMAKE_BINARY_DIR}/_vix_net")
+  endif()
+
+  if (TARGET vix::net)
+    set(VIX_NET_TARGET vix::net)
+  elseif (TARGET vix_net)
+    set(VIX_NET_TARGET vix_net)
+  elseif (TARGET net)
+    set(VIX_NET_TARGET net)
+  else()
+    find_package(vix_net CONFIG QUIET)
+    find_package(net CONFIG QUIET)
+
+    if (TARGET vix::net)
+      set(VIX_NET_TARGET vix::net)
+    elseif (TARGET vix_net)
+      set(VIX_NET_TARGET vix_net)
+    elseif (TARGET net)
+      set(VIX_NET_TARGET net)
+    endif()
+  endif()
+
+  if (NOT VIX_NET_TARGET AND VIX_CACHE_FETCH_NET)
+    include(FetchContent)
+    message(STATUS "[cache] Fetching vix::net via FetchContent")
+    FetchContent_Declare(vix_net
+      GIT_REPOSITORY https://github.com/vixcpp/net.git
+      GIT_TAG        v0.1.0
+    )
+    FetchContent_MakeAvailable(vix_net)
+
+    if (TARGET vix::net)
+      set(VIX_NET_TARGET vix::net)
+    elseif (TARGET vix_net)
+      set(VIX_NET_TARGET vix_net)
+    elseif (TARGET net)
+      set(VIX_NET_TARGET net)
     endif()
   endif()
 endif()
 
-set(VIX_NET_TARGET vix::net)
+if (NOT VIX_NET_TARGET)
+  message(FATAL_ERROR
+    "[cache] vix::net not found.\n"
+    "Expected one of:\n"
+    "  - existing target: vix::net / vix_net / net\n"
+    "  - local sibling module in ../net\n"
+    "  - installed package via find_package(vix_net CONFIG) or find_package(net CONFIG)\n"
+  )
+endif()
 
 # --------------------------------------------------------------------
 # JSON dependency
-# Policy:
-#   - Umbrella: vix::json must already be provided by umbrella.
-#   - Standalone: try sibling ../json first.
+# Resolution policy:
+#   1) Reuse already available targets
+#   2) Try local sibling module
+#   3) Try installed packages
 # Notes:
-#   - Cache must not export-link nlohmann_json directly.
-#   - The json module owns the backend provider selection.
+#   - Cache depends on the Vix json module, not directly on nlohmann_json.
 # --------------------------------------------------------------------
-if (DEFINED VIX_UMBRELLA_BUILD AND VIX_UMBRELLA_BUILD)
-  if (NOT TARGET vix::json)
-    message(FATAL_ERROR "[cache] Umbrella build: vix::json must be provided by umbrella before cache.")
-  endif()
+set(VIX_JSON_TARGET "")
+
+if (TARGET vix::json)
+  message(STATUS "[cache] Using existing target vix::json")
+  set(VIX_JSON_TARGET vix::json)
+
+elseif (TARGET vix_json)
+  message(STATUS "[cache] Using existing target vix_json")
+  set(VIX_JSON_TARGET vix_json)
+
+elseif (TARGET json)
+  message(STATUS "[cache] Using existing target json")
+  set(VIX_JSON_TARGET json)
+
 else()
-  if (NOT TARGET vix::json)
-    if (EXISTS "${CMAKE_CURRENT_LIST_DIR}/../json/CMakeLists.txt")
-      message(STATUS "[cache] Adding json from umbrella: ../json")
-      add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../json" "json")
-    else()
-      message(FATAL_ERROR
-        "vix::json not found. Provide the target before cache or make sure ../json is available.")
+  get_filename_component(_VIX_MODULES_DIR "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
+  set(_VIX_JSON_DIR "${_VIX_MODULES_DIR}/json")
+
+  if (EXISTS "${_VIX_JSON_DIR}/CMakeLists.txt")
+    message(STATUS "[cache] Adding local sibling json: ${_VIX_JSON_DIR}")
+    add_subdirectory("${_VIX_JSON_DIR}" "${CMAKE_BINARY_DIR}/_vix_json")
+  endif()
+
+  if (TARGET vix::json)
+    set(VIX_JSON_TARGET vix::json)
+  elseif (TARGET vix_json)
+    set(VIX_JSON_TARGET vix_json)
+  elseif (TARGET json)
+    set(VIX_JSON_TARGET json)
+  else()
+    find_package(vix_json CONFIG QUIET)
+    find_package(json CONFIG QUIET)
+
+    if (TARGET vix::json)
+      set(VIX_JSON_TARGET vix::json)
+    elseif (TARGET vix_json)
+      set(VIX_JSON_TARGET vix_json)
+    elseif (TARGET json)
+      set(VIX_JSON_TARGET json)
     endif()
   endif()
 endif()
 
-set(VIX_JSON_TARGET vix::json)
+if (NOT VIX_JSON_TARGET)
+  message(FATAL_ERROR
+    "[cache] vix::json not found.\n"
+    "Expected one of:\n"
+    "  - existing target: vix::json / vix_json / json\n"
+    "  - local sibling module in ../json\n"
+    "  - installed package via find_package(vix_json CONFIG) or find_package(json CONFIG)\n"
+  )
+endif()
 
 # --------------------------------------------------------------------
 # Library mode
@@ -197,6 +283,30 @@ else()
     )
   endif()
 endif()
+
+configure_package_config_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/cmake/vix_cacheConfig.cmake.in"
+  "${CMAKE_CURRENT_BINARY_DIR}/vix_cacheConfig.cmake"
+  INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/vix_cache"
+)
+
+write_basic_package_version_file(
+  "${CMAKE_CURRENT_BINARY_DIR}/vix_cacheConfigVersion.cmake"
+  VERSION ${PROJECT_VERSION}
+  COMPATIBILITY SameMajorVersion
+)
+
+install(FILES
+  "${CMAKE_CURRENT_BINARY_DIR}/vix_cacheConfig.cmake"
+  "${CMAKE_CURRENT_BINARY_DIR}/vix_cacheConfigVersion.cmake"
+  DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/vix_cache"
+)
+
+install(EXPORT VixTargets
+  FILE VixTargets.cmake
+  NAMESPACE vix::
+  DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/vix_cache"
+)
 
 # --------------------------------------------------------------------
 # Tests
