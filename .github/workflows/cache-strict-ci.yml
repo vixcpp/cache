@@ -68,11 +68,13 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -y $DEPS
 
-      - name: Fetch sibling net
+      - name: Fetch sibling dependencies
         run: |
-          rm -rf ../net
+          rm -rf ../net ../json
           git clone --depth 1 --branch "${VIX_GIT_BRANCH}" https://github.com/vixcpp/net.git ../net
+          git clone --depth 1 --branch "${VIX_GIT_BRANCH}" https://github.com/vixcpp/json.git ../json
           test -f ../net/CMakeLists.txt || (echo "::error::../net/CMakeLists.txt is missing"; exit 1)
+          test -f ../json/CMakeLists.txt || (echo "::error::../json/CMakeLists.txt is missing"; exit 1)
 
       - name: Select compiler
         run: |
@@ -90,8 +92,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
             -DVIX_CACHE_BUILD_TESTS=ON \
-            -DVIX_CACHE_FETCH_NET=${{ matrix.fetch_net }} \
-            -DVIX_CACHE_FETCH_NLOHMANN=${{ matrix.fetch_json }}
+            -DVIX_CACHE_FETCH_NET=${{ matrix.fetch_net }}
 
       - name: Build
         run: |

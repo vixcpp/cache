@@ -1,0 +1,10 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+find_dependency(vix_net CONFIG REQUIRED)
+find_dependency(vix_json CONFIG REQUIRED)
+
+include("${CMAKE_CURRENT_LIST_DIR}/VixTargets.cmake")
+
+check_required_components(vix_cache)
