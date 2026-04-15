@@ -6,10 +6,12 @@ on:
     paths:
       - ".github/workflows/cache-strict-ci.yml"
       - "CMakeLists.txt"
+      - "cmake/**"
       - "include/**"
       - "src/**"
       - "tests/**"
       - "README.md"
+      - "CHANGELOG.md"
       - "LICENSE"
       - "vix.json"
   pull_request:
@@ -17,10 +19,12 @@ on:
     paths:
       - ".github/workflows/cache-strict-ci.yml"
       - "CMakeLists.txt"
+      - "cmake/**"
       - "include/**"
       - "src/**"
       - "tests/**"
       - "README.md"
+      - "CHANGELOG.md"
       - "LICENSE"
       - "vix.json"
   workflow_dispatch:
@@ -47,43 +51,41 @@ env:
   VIX_GIT_BRANCH: dev
 
 jobs:
-  build-test:
-    name: Build and Tests (${{ matrix.compiler }}, fetch_net=${{ matrix.fetch_net }}, fetch_json=${{ matrix.fetch_json }})
+  build-test-sanitized:
+    name: Sanitized Build and Tests (${{ matrix.compiler }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         compiler: [clang, gcc]
-        fetch_net: [OFF]
-        fetch_json: [OFF]
 
     steps:
-      - name: Checkout cache repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      - uses: actions/checkout@v4
 
-      - name: Install dependencies
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y $DEPS
-
-      - name: Fetch sibling dependencies
+      - name: Fetch dependencies
         run: |
           rm -rf ../net ../json
           git clone --depth 1 --branch "${VIX_GIT_BRANCH}" https://github.com/vixcpp/net.git ../net
           git clone --depth 1 --branch "${VIX_GIT_BRANCH}" https://github.com/vixcpp/json.git ../json
-          test -f ../net/CMakeLists.txt || (echo "::error::../net/CMakeLists.txt is missing"; exit 1)
-          test -f ../json/CMakeLists.txt || (echo "::error::../json/CMakeLists.txt is missing"; exit 1)
+
+      - name: Verify dependencies
+        run: |
+          test -f ../net/CMakeLists.txt || exit 1
+          test -f ../json/CMakeLists.txt || exit 1
+
+      - name: Install deps
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y $DEPS
 
       - name: Select compiler
         run: |
           if [ "${{ matrix.compiler }}" = "clang" ]; then
-            echo "CC=clang" >> "$GITHUB_ENV"
-            echo "CXX=clang++" >> "$GITHUB_ENV"
+            echo "CC=clang" >> $GITHUB_ENV
+            echo "CXX=clang++" >> $GITHUB_ENV
           else
-            echo "CC=gcc" >> "$GITHUB_ENV"
-            echo "CXX=g++" >> "$GITHUB_ENV"
+            echo "CC=gcc" >> $GITHUB_ENV
+            echo "CXX=g++" >> $GITHUB_ENV
           fi
 
       - name: Configure
@@ -92,365 +94,221 @@ jobs:
             -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
             -DVIX_CACHE_BUILD_TESTS=ON \
-            -DVIX_CACHE_FETCH_NET=${{ matrix.fetch_net }}
+            -DVIX_ENABLE_SANITIZERS=ON \
+            -DVIX_CACHE_FETCH_NET=OFF
 
       - name: Build
-        run: |
-          cmake --build build -j"${BUILD_JOBS}"
+        run: cmake --build build -j${BUILD_JOBS}
 
-      - name: Print executables
-        run: |
-          echo "---- executables ----"
-          find build -type f -executable | sort || true
-
-      - name: Run ctest
-        run: |
-          set -e
-          cd build
-          if ctest --output-on-failure --timeout 90; then
-            echo "All discovered tests passed."
-          else
-            echo "::warning::Some tests failed or no tests were discovered."
-            test -f Testing/Temporary/LastTest.log && cat Testing/Temporary/LastTest.log || true
-            exit 0
-          fi
-
-  runtime-smoke:
-    name: Runtime Smoke Checks
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout cache repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y $DEPS
-
-      - name: Fetch sibling net
-        run: |
-          rm -rf ../net
-          git clone --depth 1 --branch "${VIX_GIT_BRANCH}" https://github.com/vixcpp/net.git ../net
-          test -f ../net/CMakeLists.txt || (echo "::error::../net/CMakeLists.txt is missing"; exit 1)
-
-      - name: Configure runtime build
-        run: |
-          cmake -G Ninja -S . -B build-runtime \
-            -DCMAKE_BUILD_TYPE=Debug \
-            -DVIX_CACHE_BUILD_TESTS=ON \
-            -DVIX_CACHE_FETCH_NET=OFF \
-            -DVIX_CACHE_FETCH_NLOHMANN=OFF
-
-      - name: Build runtime artifacts
-        run: |
-          cmake --build build-runtime -j"${BUILD_JOBS}"
-
-      - name: List candidate executables
-        run: |
-          echo "---- runtime candidates ----"
-          find build-runtime -type f -executable | sort || true
-
-      - name: Run smoke tests on executables
-        shell: bash
-        run: |
-          set +e
-          FAIL=0
-
-          mapfile -t CANDIDATES < <(
-            find build-runtime -type f -executable | while read -r exe; do
-              base="$(basename "$exe")"
-              if [[ ! "$exe" =~ /CMakeFiles/ ]] && [[ ! "$base" =~ (cmake|ctest) ]]; then
-                echo "$exe"
-              fi
-            done | sort -u
-          )
-
-          if [ ${#CANDIDATES[@]} -eq 0 ]; then
-            echo "No executable candidates found."
-            exit 0
-          fi
-
-          for exe in "${CANDIDATES[@]}"; do
-            echo "==> Smoke run: $exe"
-            timeout 5s "$exe" >/tmp/cache_smoke.log 2>&1
-            STATUS=$?
-            cat /tmp/cache_smoke.log || true
-
-            if [ $STATUS -ne 0 ] && [ $STATUS -ne 124 ]; then
-              echo "::warning::Non-zero exit status from $exe (status=$STATUS)"
-              FAIL=1
-            fi
-          done
-
-          if [ $FAIL -ne 0 ]; then
-            echo "::warning::Some smoke runs reported issues."
-          else
-            echo "Smoke runs completed."
-          fi
-          exit 0
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure
 
   static-analysis:
     name: Static Analysis
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout cache repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      - uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Fetch dependencies
+        run: |
+          rm -rf ../net ../json
+          git clone --depth 1 --branch "${VIX_GIT_BRANCH}" https://github.com/vixcpp/net.git ../net
+          git clone --depth 1 --branch "${VIX_GIT_BRANCH}" https://github.com/vixcpp/json.git ../json
+
+      - name: Verify dependencies
+        run: |
+          test -f ../net/CMakeLists.txt || exit 1
+          test -f ../json/CMakeLists.txt || exit 1
+
+      - name: Install deps
         run: |
           sudo apt-get update -y
           sudo apt-get install -y $DEPS
 
-      - name: Fetch sibling net
+      - name: Configure
         run: |
-          rm -rf ../net
-          git clone --depth 1 --branch "${VIX_GIT_BRANCH}" https://github.com/vixcpp/net.git ../net || true
-
-      - name: Configure for analysis
-        run: |
-          cmake -G Ninja -S . -B build-analyze \
-            -DCMAKE_BUILD_TYPE=Debug \
+          cmake -G Ninja -S . -B build \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DCMAKE_BUILD_TYPE=Debug \
             -DVIX_CACHE_BUILD_TESTS=ON \
-            -DVIX_CACHE_FETCH_NET=OFF \
-            -DVIX_CACHE_FETCH_NLOHMANN=OFF
+            -DVIX_CACHE_FETCH_NET=OFF
 
-      - name: Run clang-tidy on source files
+      - name: clang-tidy
         run: |
-          set +e
-          find src tests -name '*.cpp' -print0 | xargs -0 -n1 -P2 clang-tidy -p build-analyze
-          STATUS=$?
-          if [ $STATUS -ne 0 ]; then
-            echo "::warning::clang-tidy reported issues."
-          else
-            echo "clang-tidy completed successfully."
-          fi
-          exit 0
+          find src tests -name '*.cpp' | xargs -r clang-tidy -p build || true
 
-      - name: Run cppcheck on headers and sources
+      - name: cppcheck
         run: |
-          set +e
           cppcheck \
             --enable=all \
             --std=c++20 \
             --inconclusive \
             --quiet \
             --suppress=missingIncludeSystem \
-            include/ src/ tests/
-          STATUS=$?
-          if [ $STATUS -ne 0 ]; then
-            echo "::warning::cppcheck reported issues."
-          else
-            echo "cppcheck completed successfully."
-          fi
-          exit 0
+            include src tests || true
 
   valgrind:
-    name: Valgrind Checks
+    name: Valgrind
     runs-on: ubuntu-latest
-    timeout-minutes: 30
 
     steps:
-      - name: Checkout cache repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      - uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Fetch dependencies
+        run: |
+          rm -rf ../net ../json
+          git clone --depth 1 --branch "${VIX_GIT_BRANCH}" https://github.com/vixcpp/net.git ../net
+          git clone --depth 1 --branch "${VIX_GIT_BRANCH}" https://github.com/vixcpp/json.git ../json
+
+      - name: Verify dependencies
+        run: |
+          test -f ../net/CMakeLists.txt || exit 1
+          test -f ../json/CMakeLists.txt || exit 1
+
+      - name: Install deps
         run: |
           sudo apt-get update -y
           sudo apt-get install -y $DEPS
 
-      - name: Fetch sibling net
+      - name: Configure
         run: |
-          rm -rf ../net
-          git clone --depth 1 --branch "${VIX_GIT_BRANCH}" https://github.com/vixcpp/net.git ../net
-          test -f ../net/CMakeLists.txt || (echo "::error::../net/CMakeLists.txt is missing"; exit 1)
-
-      - name: Configure valgrind build
-        run: |
-          cmake -G Ninja -S . -B build-valgrind \
+          cmake -G Ninja -S . -B build \
             -DCMAKE_BUILD_TYPE=Debug \
             -DVIX_CACHE_BUILD_TESTS=ON \
-            -DVIX_CACHE_FETCH_NET=OFF \
-            -DVIX_CACHE_FETCH_NLOHMANN=OFF
+            -DVIX_CACHE_FETCH_NET=OFF
 
       - name: Build
+        run: cmake --build build -j${BUILD_JOBS}
+
+      - name: Run valgrind
         run: |
-          cmake --build build-valgrind -j"${BUILD_JOBS}"
-
-      - name: Run valgrind on executables
-        shell: bash
-        run: |
-          set +e
-          FAIL=0
-
-          mapfile -t CANDIDATES < <(
-            find build-valgrind -type f -executable | while read -r exe; do
-              base="$(basename "$exe")"
-              if [[ ! "$exe" =~ /CMakeFiles/ ]] && [[ ! "$base" =~ (cmake|ctest) ]]; then
-                echo "$exe"
-              fi
-            done | sort -u
-          )
-
-          if [ ${#CANDIDATES[@]} -eq 0 ]; then
-            echo "No executable candidates found."
-            exit 0
-          fi
-
-          for exe in "${CANDIDATES[@]}"; do
-            echo "==> Valgrind: $exe"
-            timeout 20s valgrind \
-              --leak-check=full \
-              --show-leak-kinds=all \
-              --track-origins=yes \
-              "$exe" >/tmp/cache_valgrind.log 2>&1
-            STATUS=$?
-            cat /tmp/cache_valgrind.log || true
-
-            if [ $STATUS -ne 0 ] && [ $STATUS -ne 124 ]; then
-              echo "::warning::Valgrind reported issues for $exe"
-              FAIL=1
-            fi
+          for exe in $(find build/tests -type f -executable); do
+            valgrind --leak-check=full "$exe" || true
           done
 
-          if [ $FAIL -ne 0 ]; then
-            echo "::warning::Valgrind detected potential issues."
-          else
-            echo "Valgrind checks completed."
-          fi
-          exit 0
-
-  standalone-package-check:
-    name: Standalone Package Export Check
+  package-smoke:
+    name: Package Smoke
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout cache repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      - uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Fetch dependencies
+        run: |
+          rm -rf ../net ../json
+          git clone --depth 1 --branch "${VIX_GIT_BRANCH}" https://github.com/vixcpp/net.git ../net
+          git clone --depth 1 --branch "${VIX_GIT_BRANCH}" https://github.com/vixcpp/json.git ../json
+
+      - name: Verify dependencies
+        run: |
+          test -f ../net/CMakeLists.txt || exit 1
+          test -f ../json/CMakeLists.txt || exit 1
+
+      - name: Install deps
         run: |
           sudo apt-get update -y
           sudo apt-get install -y $DEPS
 
-      - name: Fetch sibling net
+      - name: Install json
         run: |
-          rm -rf ../net
-          git clone --depth 1 --branch "${VIX_GIT_BRANCH}" https://github.com/vixcpp/net.git ../net
-          test -f ../net/CMakeLists.txt || (echo "::error::../net/CMakeLists.txt is missing"; exit 1)
+          cmake -S ../json -B ../json/build \
+            -DCMAKE_INSTALL_PREFIX=$PWD/stage
+          cmake --build ../json/build
+          cmake --install ../json/build
 
-      - name: Configure installable standalone build
+      - name: Install net
         run: |
-          cmake -G Ninja -S . -B build-install \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DVIX_CACHE_BUILD_TESTS=OFF \
-            -DVIX_CACHE_FETCH_NET=OFF \
-            -DVIX_CACHE_FETCH_NLOHMANN=OFF \
-            -DCMAKE_INSTALL_PREFIX="${PWD}/.ci-install"
+          cmake -S ../net -B ../net/build \
+            -DCMAKE_PREFIX_PATH=$PWD/stage \
+            -DCMAKE_INSTALL_PREFIX=$PWD/stage
+          cmake --build ../net/build
+          cmake --install ../net/build
 
-      - name: Build standalone package
+      - name: Install cache
         run: |
-          cmake --build build-install -j"${BUILD_JOBS}"
+          cmake -S . -B build \
+            -DCMAKE_PREFIX_PATH=$PWD/stage \
+            -DCMAKE_INSTALL_PREFIX=$PWD/stage \
+            -DVIX_CACHE_FETCH_NET=OFF
+          cmake --build build
+          cmake --install build
 
-      - name: Install standalone package
+      - name: Smoke test
         run: |
-          cmake --install build-install
+          mkdir smoke
+          cat > smoke/CMakeLists.txt <<EOF
+          cmake_minimum_required(VERSION 3.20)
+          project(cache_smoke)
+          find_package(vix_cache CONFIG REQUIRED)
+          add_executable(main main.cpp)
+          target_link_libraries(main PRIVATE vix::cache)
+          EOF
 
-      - name: Verify installed package files
-        run: |
-          echo "---- install tree ----"
-          find .ci-install -maxdepth 8 -type f | sort || true
+          cat > smoke/main.cpp <<EOF
+          #include <iostream>
+          int main() { std::cout << "ok"; }
+          EOF
 
-          test -f .ci-install/include/vix/cache/Cache.hpp || (echo "::error::cache headers not found"; exit 1)
-          test -f .ci-install/include/vix/cache/FileStore.hpp || (echo "::error::cache FileStore header not found"; exit 1)
-
-          if [ -f .ci-install/lib/libvix_cache.a ]; then
-            echo "Static cache library detected."
-          elif [ -f .ci-install/lib/libvix_cache.so ]; then
-            echo "Shared cache library detected."
-          else
-            echo "::error::installed cache library not found"
-            exit 1
-          fi
+          cmake -S smoke -B smoke/build -DCMAKE_PREFIX_PATH=$PWD/stage
+          cmake --build smoke/build
 
   config-coverage:
     name: Configuration Coverage
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout cache repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      - uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Fetch dependencies
+        run: |
+          rm -rf ../net ../json
+          git clone --depth 1 --branch "${VIX_GIT_BRANCH}" https://github.com/vixcpp/net.git ../net
+          git clone --depth 1 --branch "${VIX_GIT_BRANCH}" https://github.com/vixcpp/json.git ../json
+
+      - name: Verify dependencies
+        run: |
+          test -f ../net/CMakeLists.txt || exit 1
+          test -f ../json/CMakeLists.txt || exit 1
+
+      - name: Install deps
         run: |
           sudo apt-get update -y
           sudo apt-get install -y $DEPS
-
-      - name: Fetch sibling net
-        run: |
-          rm -rf ../net
-          git clone --depth 1 --branch "${VIX_GIT_BRANCH}" https://github.com/vixcpp/net.git ../net
-          test -f ../net/CMakeLists.txt || (echo "::error::../net/CMakeLists.txt is missing"; exit 1)
 
       - name: Configure release mode
         run: |
           cmake -G Ninja -S . -B build-release \
             -DCMAKE_BUILD_TYPE=Release \
             -DVIX_CACHE_BUILD_TESTS=OFF \
-            -DVIX_CACHE_FETCH_NET=OFF \
-            -DVIX_CACHE_FETCH_NLOHMANN=OFF
+            -DVIX_CACHE_FETCH_NET=OFF
 
       - name: Build release mode
         run: |
-          cmake --build build-release -j"${BUILD_JOBS}"
+          cmake --build build-release -j${BUILD_JOBS}
 
       - name: Configure debug mode
         run: |
           cmake -G Ninja -S . -B build-debug \
             -DCMAKE_BUILD_TYPE=Debug \
             -DVIX_CACHE_BUILD_TESTS=ON \
-            -DVIX_CACHE_FETCH_NET=OFF \
-            -DVIX_CACHE_FETCH_NLOHMANN=OFF
+            -DVIX_CACHE_FETCH_NET=OFF
 
       - name: Build debug mode
         run: |
-          cmake --build build-debug -j"${BUILD_JOBS}"
+          cmake --build build-debug -j${BUILD_JOBS}
 
   summary:
-    name: Cache Strict CI Summary
+    name: Summary
     needs:
       [
-        build-test,
-        runtime-smoke,
+        build-test-sanitized,
         static-analysis,
         valgrind,
-        standalone-package-check,
+        package-smoke,
         config-coverage,
       ]
     runs-on: ubuntu-latest
 
     steps:
-      - name: Print summary
-        run: |
-          echo "Cache strict CI completed."
-          echo "This workflow validates:"
-          echo "- build with clang and gcc"
-          echo "- standalone net dependency wiring"
-          echo "- nlohmann_json availability"
-          echo "- runtime smoke checks"
-          echo "- static analysis"
-          echo "- valgrind"
-          echo "- standalone package export"
-          echo "- debug and release configuration coverage"
+      - run: echo "Cache strict CI passed"
