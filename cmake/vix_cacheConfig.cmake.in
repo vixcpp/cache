@@ -4,6 +4,6 @@ include(CMakeFindDependencyMacro)
 
 find_dependency(vix_net CONFIG REQUIRED)
 
-include("${CMAKE_CURRENT_LIST_DIR}/VixTargets.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/vix_cacheTargets.cmake")
 
 check_required_components(vix_cache)
