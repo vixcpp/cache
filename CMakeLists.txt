@@ -214,15 +214,15 @@ if (CACHE_SOURCES)
     PUBLIC
       ${VIX_NET_TARGET}
     PRIVATE
-      ${VIX_JSON_TARGET}
+      "$<BUILD_INTERFACE:${VIX_JSON_TARGET}>"
   )
 
   if (TARGET vix_warnings)
-    target_link_libraries(vix_cache PUBLIC vix_warnings)
+    target_link_libraries(vix_cache PRIVATE "$<BUILD_INTERFACE:vix_warnings>")
   endif()
 
   if (VIX_ENABLE_SANITIZERS AND TARGET vix_sanitizers)
-    target_link_libraries(vix_cache PUBLIC vix_sanitizers)
+    target_link_libraries(vix_cache PRIVATE "$<BUILD_INTERFACE:vix_sanitizers>")
   endif()
 
   set_target_properties(vix_cache PROPERTIES
@@ -233,7 +233,7 @@ if (CACHE_SOURCES)
   )
 
   install(TARGETS vix_cache
-    EXPORT VixTargets
+    EXPORT vix_cacheTargets
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
@@ -302,8 +302,8 @@ install(FILES
   DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/vix_cache"
 )
 
-install(EXPORT VixTargets
-  FILE VixTargets.cmake
+install(EXPORT vix_cacheTargets
+  FILE vix_cacheTargets.cmake
   NAMESPACE vix::
   DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/vix_cache"
 )
