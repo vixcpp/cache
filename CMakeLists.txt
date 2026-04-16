@@ -1,4 +1,5 @@
-#  @file CMakeLists.cpp
+# ====================================================================
+#  @file CMakeLists.txt
 #  @author Gaspard Kirira
 #
 #  Copyright 2025, Gaspard Kirira.  All rights reserved.
@@ -23,7 +24,8 @@
 #   - vix::json
 #
 # Installation/Export:
-#   Installs into the umbrella export-set `VixTargets`.
+#   - Umbrella build exports into: VixTargets
+#   - Standalone build exports into: vix_cacheTargets
 # ====================================================================
 
 cmake_minimum_required(VERSION 3.20)
@@ -32,10 +34,21 @@ project(vix_cache VERSION 0.1.0 LANGUAGES CXX)
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
+# --------------------------------------------------------------------
 # Global settings
+# --------------------------------------------------------------------
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+# --------------------------------------------------------------------
+# Export set selection
+# --------------------------------------------------------------------
+if (DEFINED VIX_UMBRELLA_BUILD AND VIX_UMBRELLA_BUILD)
+  set(VIX_CACHE_EXPORT_SET VixTargets)
+else()
+  set(VIX_CACHE_EXPORT_SET vix_cacheTargets)
+endif()
 
 # --------------------------------------------------------------------
 # Umbrella build policy:
@@ -43,12 +56,18 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 # umbrella (add_subdirectory order + options). Cache must not FetchContent
 # nor add sibling subdirectories.
 # --------------------------------------------------------------------
+option(VIX_CACHE_FETCH_NET "Auto-fetch vix::net if missing" ON)
+
 if (DEFINED VIX_UMBRELLA_BUILD AND VIX_UMBRELLA_BUILD)
   set(VIX_CACHE_FETCH_NET OFF CACHE BOOL "Auto-fetch vix::net if missing" FORCE)
 endif()
 
+# --------------------------------------------------------------------
 # Sources discovery
-file(GLOB_RECURSE CACHE_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
+# --------------------------------------------------------------------
+file(GLOB_RECURSE CACHE_SOURCES CONFIGURE_DEPENDS
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
+)
 
 # --------------------------------------------------------------------
 # Net dependency
@@ -58,8 +77,6 @@ file(GLOB_RECURSE CACHE_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
 #   3) Try installed packages
 #   4) Optional FetchContent as last resort
 # --------------------------------------------------------------------
-option(VIX_CACHE_FETCH_NET "Auto-fetch vix::net if missing" ON)
-
 set(VIX_NET_TARGET "")
 
 if (TARGET vix::net)
@@ -194,7 +211,7 @@ if (NOT VIX_JSON_TARGET)
 endif()
 
 # --------------------------------------------------------------------
-# Library mode
+# Library target
 # --------------------------------------------------------------------
 if (CACHE_SOURCES)
   message(STATUS "[cache] Building STATIC library with detected sources.")
@@ -213,16 +230,16 @@ if (CACHE_SOURCES)
   target_link_libraries(vix_cache
     PUBLIC
       ${VIX_NET_TARGET}
-    PRIVATE
-      "$<BUILD_INTERFACE:${VIX_JSON_TARGET}>"
+      ${VIX_JSON_TARGET}
   )
 
+  # Build-only helpers must not leak into exported interfaces.
   if (TARGET vix_warnings)
-    target_link_libraries(vix_cache PRIVATE "$<BUILD_INTERFACE:vix_warnings>")
+    target_link_libraries(vix_cache PRIVATE vix_warnings)
   endif()
 
   if (VIX_ENABLE_SANITIZERS AND TARGET vix_sanitizers)
-    target_link_libraries(vix_cache PRIVATE "$<BUILD_INTERFACE:vix_sanitizers>")
+    target_link_libraries(vix_cache PRIVATE vix_sanitizers)
   endif()
 
   set_target_properties(vix_cache PROPERTIES
@@ -233,20 +250,12 @@ if (CACHE_SOURCES)
   )
 
   install(TARGETS vix_cache
-    EXPORT vix_cacheTargets
+    EXPORT ${VIX_CACHE_EXPORT_SET}
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
   )
-
-  if (NOT (DEFINED VIX_UMBRELLA_BUILD AND VIX_UMBRELLA_BUILD))
-    install(
-      DIRECTORY include/
-      DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-      FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h"
-    )
-  endif()
 
 else()
   message(STATUS "[cache] Building HEADER-ONLY library (no sources).")
@@ -267,46 +276,62 @@ else()
   )
 
   if (VIX_ENABLE_SANITIZERS AND TARGET vix_sanitizers)
-    target_link_libraries(vix_cache INTERFACE vix_sanitizers)
+    # Do not export build-only sanitizer helpers from header-only package targets.
   endif()
 
-  install(TARGETS vix_cache
-    EXPORT VixTargets
-    INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+  set_target_properties(vix_cache PROPERTIES
+    EXPORT_NAME cache
   )
 
-  if (NOT (DEFINED VIX_UMBRELLA_BUILD AND VIX_UMBRELLA_BUILD))
-    install(
-      DIRECTORY include/
-      DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-      FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h"
-    )
-  endif()
+  install(TARGETS vix_cache
+    EXPORT ${VIX_CACHE_EXPORT_SET}
+    INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+  )
 endif()
 
-configure_package_config_file(
-  "${CMAKE_CURRENT_SOURCE_DIR}/cmake/vix_cacheConfig.cmake.in"
-  "${CMAKE_CURRENT_BINARY_DIR}/vix_cacheConfig.cmake"
-  INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/vix_cache"
-)
+# --------------------------------------------------------------------
+# Install headers
+# --------------------------------------------------------------------
+if (NOT (DEFINED VIX_UMBRELLA_BUILD AND VIX_UMBRELLA_BUILD))
+  install(DIRECTORY include/
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    FILES_MATCHING
+      PATTERN "*.hpp"
+      PATTERN "*.h"
+  )
+endif()
 
-write_basic_package_version_file(
-  "${CMAKE_CURRENT_BINARY_DIR}/vix_cacheConfigVersion.cmake"
-  VERSION ${PROJECT_VERSION}
-  COMPATIBILITY SameMajorVersion
-)
+# --------------------------------------------------------------------
+# Standalone package config/export
+# Only for non-umbrella builds
+# --------------------------------------------------------------------
+if (NOT (DEFINED VIX_UMBRELLA_BUILD AND VIX_UMBRELLA_BUILD))
 
-install(FILES
-  "${CMAKE_CURRENT_BINARY_DIR}/vix_cacheConfig.cmake"
-  "${CMAKE_CURRENT_BINARY_DIR}/vix_cacheConfigVersion.cmake"
-  DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/vix_cache"
-)
+  configure_package_config_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/vix_cacheConfig.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/vix_cacheConfig.cmake"
+    INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/vix_cache"
+  )
 
-install(EXPORT vix_cacheTargets
-  FILE vix_cacheTargets.cmake
-  NAMESPACE vix::
-  DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/vix_cache"
-)
+  write_basic_package_version_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/vix_cacheConfigVersion.cmake"
+    VERSION ${PROJECT_VERSION}
+    COMPATIBILITY SameMajorVersion
+  )
+
+  install(FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/vix_cacheConfig.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/vix_cacheConfigVersion.cmake"
+    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/vix_cache"
+  )
+
+  install(EXPORT vix_cacheTargets
+    FILE vix_cacheTargets.cmake
+    NAMESPACE vix::
+    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/vix_cache"
+  )
+
+endif()
 
 # --------------------------------------------------------------------
 # Tests
@@ -329,8 +354,10 @@ if (CACHE_SOURCES)
 else()
   message(STATUS "Mode: HEADER-ONLY / no sources")
 endif()
-message(STATUS "JSON target:     ${VIX_JSON_TARGET}")
-message(STATUS "Net target:      ${VIX_NET_TARGET}")
-message(STATUS "Include dir: ${CMAKE_CURRENT_SOURCE_DIR}/include (for <vix/cache/...>)")
-message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
+message(STATUS "Export set:       ${VIX_CACHE_EXPORT_SET}")
+message(STATUS "JSON target:      ${VIX_JSON_TARGET}")
+message(STATUS "Net target:       ${VIX_NET_TARGET}")
+message(STATUS "Include dir:      ${CMAKE_CURRENT_SOURCE_DIR}/include (for <vix/cache/...>)")
+message(STATUS "Sanitizers:       ${VIX_ENABLE_SANITIZERS}")
+message(STATUS "Build type:       ${CMAKE_BUILD_TYPE}")
 message(STATUS "------------------------------------------------------")
