@@ -235,11 +235,15 @@ if (CACHE_SOURCES)
 
   # Build-only helpers must not leak into exported interfaces.
   if (TARGET vix_warnings)
-    target_link_libraries(vix_cache PRIVATE vix_warnings)
+    target_link_libraries(vix_cache PRIVATE
+      $<BUILD_INTERFACE:vix_warnings>
+    )
   endif()
 
   if (VIX_ENABLE_SANITIZERS AND TARGET vix_sanitizers)
-    target_link_libraries(vix_cache PRIVATE vix_sanitizers)
+    target_link_libraries(vix_cache PRIVATE
+      $<BUILD_INTERFACE:vix_sanitizers>
+    )
   endif()
 
   set_target_properties(vix_cache PROPERTIES
