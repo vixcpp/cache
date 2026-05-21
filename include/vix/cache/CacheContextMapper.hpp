@@ -45,19 +45,18 @@ namespace vix::cache
   /**
    * @brief Build a CacheContext from a NetworkProbe.
    *
-   * The resulting context reflects whether the system is currently
-   * considered offline according to the probe.
+   * The probe may refresh its internal cached network state when queried.
    *
    * @param probe Network probe instance.
    * @param now_ms Current time in milliseconds.
    * @return CacheContext derived from network state.
    */
   inline CacheContext contextFromProbe(
-      const vix::net::NetworkProbe &probe,
+      vix::net::NetworkProbe &probe,
       std::int64_t now_ms)
   {
     CacheContext ctx{};
-    if (!probe.isOnline(now_ms))
+    if (!probe.is_online(now_ms))
     {
       ctx.offline = true;
     }
@@ -76,32 +75,43 @@ namespace vix::cache
    * @return CacheContext derived from network state and outcome.
    */
   inline CacheContext contextFromProbeAndOutcome(
-      const vix::net::NetworkProbe &probe,
+      vix::net::NetworkProbe &probe,
       std::int64_t now_ms,
       RequestOutcome outcome)
   {
     CacheContext ctx = contextFromProbe(probe, now_ms);
+
     if (outcome == RequestOutcome::NetworkError)
     {
       ctx.network_error = true;
     }
+
     return ctx;
   }
 
   /**
    * @brief Convenience helper for an offline cache context.
    */
-  inline CacheContext contextOffline() noexcept { return CacheContext::Offline(); }
+  inline CacheContext contextOffline() noexcept
+  {
+    return CacheContext::Offline();
+  }
 
   /**
    * @brief Convenience helper for an online cache context.
    */
-  inline CacheContext contextOnline() noexcept { return CacheContext::Online(); }
+  inline CacheContext contextOnline() noexcept
+  {
+    return CacheContext::Online();
+  }
 
   /**
    * @brief Convenience helper for a network-error cache context.
    */
-  inline CacheContext contextNetworkError() noexcept { return CacheContext::NetworkError(); }
+  inline CacheContext contextNetworkError() noexcept
+  {
+    return CacheContext::NetworkError();
+  }
 
 } // namespace vix::cache
 
