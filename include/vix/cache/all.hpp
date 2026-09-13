@@ -20,8 +20,8 @@
  *
  *  Vix.cpp
  */
-#ifndef VIX_CACHE_CACHE_HPP
-#define VIX_CACHE_CACHE_HPP
+#ifndef VIX_CACHE_ALL_HPP
+#define VIX_CACHE_ALL_HPP
 
 // Core
 #include <vix/cache/Cache.hpp>
@@ -42,4 +42,4 @@
 // Utilities
 #include <vix/cache/HeaderUtil.hpp>
 
-#endif // VIX_CACHE_CACHE_HPP
+#endif // VIX_CACHE_ALL_HPP

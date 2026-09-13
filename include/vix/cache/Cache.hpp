@@ -13,8 +13,8 @@
  *  Vix.cpp
  *
  */
-#ifndef VIX_CACHE_HPP
-#define VIX_CACHE_HPP
+#ifndef VIX_CACHE_CACHE_HPP
+#define VIX_CACHE_CACHE_HPP
 
 #include <cstddef>
 #include <cstdint>
@@ -102,4 +102,4 @@ namespace vix::cache
 
 } // namespace vix::cache
 
-#endif // VIX_CACHE_HPP
+#endif // VIX_CACHE_CACHE_HPP
