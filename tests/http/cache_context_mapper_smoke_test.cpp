@@ -16,9 +16,6 @@
 #include <iostream>
 #include <memory>
 #include <string>
-#include <optional>
-
-#include <vix/net/NetworkProbe.hpp>
 
 #include <vix/cache/Cache.hpp>
 #include <vix/cache/CacheContext.hpp>
@@ -50,19 +47,43 @@ struct NetResult
   std::string body;
 };
 
+static void test_connectivity_context_mapping()
+{
+  using namespace vix::cache;
+
+  const auto online = contextFromConnectivity(true);
+  assert(!online.offline);
+  assert(!online.network_error);
+
+  const auto offline = contextFromConnectivity(false);
+  assert(offline.offline);
+  assert(!offline.network_error);
+
+  const auto network_error = contextFromConnectivityAndOutcome(
+      true,
+      RequestOutcome::NetworkError);
+  assert(!network_error.offline);
+  assert(network_error.network_error);
+
+  const auto offline_network_error = contextFromConnectivityAndOutcome(
+      false,
+      RequestOutcome::NetworkError);
+  assert(offline_network_error.offline);
+  assert(offline_network_error.network_error);
+}
+
 // Pure function we can test
 static Decision handle_get_with_cache(
     vix::cache::Cache &cache,
     const std::string &key,
     std::int64_t t,
-    vix::net::NetworkProbe &probe,
-    const NetResult &net,
-    std::optional<vix::cache::CacheContext> forced_ctx = std::nullopt)
+    bool online,
+    const NetResult &net)
 {
   using namespace vix::cache;
 
-  // 1) Determine context (test override if provided)
-  CacheContext ctx = forced_ctx ? *forced_ctx : contextFromProbe(probe, t);
+  // 1) Determine context from the current connectivity state.
+  CacheContext ctx = contextFromConnectivity(online);
 
   // 2) Offline => cache only
   if (ctx.offline)
@@ -85,10 +106,9 @@ static Decision handle_get_with_cache(
   // 4) Network error => fallback cache
   if (net.network_error)
   {
-    CacheContext err_ctx = forced_ctx ? *forced_ctx
-                                      : contextFromProbeAndOutcome(probe, t, RequestOutcome::NetworkError);
-    // Important: we want "network_error=true" in this context
-    err_ctx.network_error = true;
+    CacheContext err_ctx = contextFromConnectivityAndOutcome(
+        online,
+        RequestOutcome::NetworkError);
 
     auto cached = cache.get(key, t, err_ctx);
     return cached ? Decision::CacheHit : Decision::ErrorMiss;
@@ -118,14 +138,8 @@ static void test_offline_cache_hit()
   e.created_at_ms = t0;
   cache.put(key, e);
 
-  vix::net::NetworkProbe probe(
-      vix::net::NetworkProbe::Config{},
-      []
-      { return false; } // offline
-  );
-
   NetResult net{};
-  auto d = handle_get_with_cache(cache, key, t0 + 5000, probe, net);
+  auto d = handle_get_with_cache(cache, key, t0 + 5000, false, net);
   assert(d == Decision::CacheHit);
 
   std::cout << "[OK] offline -> cache hit\n";
@@ -146,14 +160,8 @@ static void test_offline_cache_miss()
   const std::string key = "GET:/api/missing";
   const auto t0 = now_ms();
 
-  vix::net::NetworkProbe probe(
-      vix::net::NetworkProbe::Config{},
-      []
-      { return false; } // offline
-  );
-
   NetResult net{};
-  auto d = handle_get_with_cache(cache, key, t0, probe, net);
+  auto d = handle_get_with_cache(cache, key, t0, false, net);
   assert(d == Decision::OfflineMiss);
 
   std::cout << "[OK] offline -> cache miss\n";
@@ -171,18 +179,12 @@ static void test_online_network_ok_populates_cache()
   const std::string key = "GET:/api/products?limit=10";
   const auto t0 = now_ms();
 
-  vix::net::NetworkProbe probe(
-      vix::net::NetworkProbe::Config{},
-      []
-      { return true; } // online
-  );
-
   NetResult net{};
   net.ok = true;
   net.status = 200;
   net.body = R"({"from":"network"})";
 
-  auto d = handle_get_with_cache(cache, key, t0, probe, net, CacheContext::Online());
+  auto d = handle_get_with_cache(cache, key, t0, true, net);
   assert(d == Decision::NetOk);
 
   // Now ensure cached
@@ -215,18 +217,12 @@ static void test_online_network_error_fallback_cache()
   e.created_at_ms = t0;
   cache.put(key, e);
 
-  vix::net::NetworkProbe probe(
-      vix::net::NetworkProbe::Config{},
-      []
-      { return true; } // probe says online
-  );
-
   NetResult net{};
   net.ok = false;
   net.network_error = true;
 
   // After 4000ms: entry is expired (ttl=100) but within stale_if_error window (10s)
-  auto d = handle_get_with_cache(cache, key, t0 + 4000, probe, net, CacheContext::NetworkError());
+  auto d = handle_get_with_cache(cache, key, t0 + 4000, true, net);
   assert(d == Decision::CacheHit);
 
   std::cout << "[OK] online + network error -> stale-if-error cache hit\n";
@@ -234,6 +230,7 @@ static void test_online_network_error_fallback_cache()
 
 int main()
 {
+  test_connectivity_context_mapping();
   test_offline_cache_hit();
   test_offline_cache_miss();
   test_online_network_ok_populates_cache();

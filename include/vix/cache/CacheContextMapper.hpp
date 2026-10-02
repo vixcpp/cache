@@ -16,10 +16,7 @@
 #ifndef VIX_CACHE_CONTEXT_MAPPER_HPP
 #define VIX_CACHE_CONTEXT_MAPPER_HPP
 
-#include <cstdint>
-
 #include <vix/cache/CacheContext.hpp>
-#include <vix/net/NetworkProbe.hpp>
 
 namespace vix::cache
 {
@@ -43,20 +40,15 @@ namespace vix::cache
   };
 
   /**
-   * @brief Build a CacheContext from a NetworkProbe.
+   * @brief Build a CacheContext from current connectivity state.
    *
-   * The probe may refresh its internal cached network state when queried.
-   *
-   * @param probe Network probe instance.
-   * @param now_ms Current time in milliseconds.
-   * @return CacheContext derived from network state.
+   * @param online True when the caller considers connectivity available.
+   * @return CacheContext derived from the supplied connectivity state.
    */
-  inline CacheContext contextFromProbe(
-      vix::net::NetworkProbe &probe,
-      std::int64_t now_ms)
+  inline CacheContext contextFromConnectivity(bool online) noexcept
   {
     CacheContext ctx{};
-    if (!probe.is_online(now_ms))
+    if (!online)
     {
       ctx.offline = true;
     }
@@ -64,22 +56,20 @@ namespace vix::cache
   }
 
   /**
-   * @brief Build a CacheContext from a NetworkProbe and request outcome.
+   * @brief Build a CacheContext from connectivity state and request outcome.
    *
-   * Extends contextFromProbe() by marking network_error when the
+   * Extends contextFromConnectivity() by marking network_error when the
    * request explicitly failed due to network issues.
    *
-   * @param probe Network probe instance.
-   * @param now_ms Current time in milliseconds.
+   * @param online True when the caller considers connectivity available.
    * @param outcome Result of the network request.
    * @return CacheContext derived from network state and outcome.
    */
-  inline CacheContext contextFromProbeAndOutcome(
-      vix::net::NetworkProbe &probe,
-      std::int64_t now_ms,
-      RequestOutcome outcome)
+  inline CacheContext contextFromConnectivityAndOutcome(
+      bool online,
+      RequestOutcome outcome) noexcept
   {
-    CacheContext ctx = contextFromProbe(probe, now_ms);
+    CacheContext ctx = contextFromConnectivity(online);
 
     if (outcome == RequestOutcome::NetworkError)
     {
